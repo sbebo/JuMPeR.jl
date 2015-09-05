@@ -48,6 +48,9 @@ type RobustData
     uncertaintyset::Vector
     normconstraints::Vector
     
+    # Adaptive constraints
+    varaffcons::Vector  # no uncertainty
+
     # Uncertainty data
     numUncs::Int
     uncNames::Vector{UTF8String}
@@ -68,7 +71,17 @@ type RobustData
     uncData::ObjectIdDict
 
     # Provided scenarios
-    scenarios::Vector
+    scenarios::Vector{Any}
+
+    # Adaptive variables
+    numAdapt::Int
+    adpNames::Vector{UTF8String}
+    adpLower::Vector{Float64}
+    adpUpper::Vector{Float64}
+    adpCat::Vector{Symbol}
+    adpPolicy::Vector{Symbol}
+    adpStage::Vector{Int}
+    adpDependsOn::Vector # {Vector{Uncertain}}
 
     solve_time::Float64
 end
@@ -77,6 +90,9 @@ RobustData(cutsolver) = RobustData(
     Any[],          # oracles
     Any[],          # uncertaintyset
     Any[],          # normconstraints
+    # Adaptive constraints
+    VarAffConstraint[],     # varaffcons
+    # Uncertainty set
     0,              # numUncs
     UTF8String[],   # uncNames
     Float64[],      # uncLower
@@ -89,6 +105,13 @@ RobustData(cutsolver) = RobustData(
     Dict{Symbol,Any}(), # uncDict
     ObjectIdDict(), # uncData
     Any[],          # scenarios
+    # Adaptive variables
+    0, UTF8String[],        # Number, names
+    Float64[],Float64[],    # Lower, upper
+    Symbol[],Symbol[],      # Category, adapt type
+    Int[],                  # Stage
+    Vector{Uncertain}[],    # Depends on
+
     0.0)            # solve_time
 function RobustModel(; solver=JuMP.UnsetSolver(),
                     cutsolver=JuMP.UnsetSolver())
@@ -230,6 +253,9 @@ addEllipseConstraint(m::Model, vec::Vector, Gamma::Real) =
 
 
 #-----------------------------------------------------------------------
+# Adaptive optimization
+include("adaptive/adaptvar.jl")
+
 # Scenarios
 include("scenario.jl")
 
