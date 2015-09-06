@@ -32,10 +32,14 @@ import JuMP: JuMPContainer, JuMPDict, JuMPArray
 # JuMPeRs exported interface
 export RobustModel, getNumUncs
 export setDefaultOracle!
-export Uncertain, @defUnc, addEllipseConstraint
-export UncExpr, UncAffExpr
-export UncConstraint, UncSetConstraint, EllipseConstraint
-
+# Uncertain parameters
+export Uncertain, @defUnc, UncExpr, UncSetConstraint
+# Adaptive variables
+export AdaptAffExpr, AdaptConstraint
+# Mixes of uncertain parameters and adaptive variables
+export UncAffExpr, UncConstraint
+# Deprecated
+export addEllipseConstraint, EllipseConstraint
 
 #-----------------------------------------------------------------------
 # RobustData contains all extensions to the base JuMP model type
@@ -133,7 +137,7 @@ end
 
 #-----------------------------------------------------------------------
 # Uncertain
-# Similar to JuMP.Variable, has an reference back to the model and an id num
+# An uncertain parameter, implemented much the same as a JuMP.Variable
 type Uncertain <: JuMP.AbstractJuMPScalar
     m::Model
     id::Int
@@ -162,6 +166,7 @@ getNumUncs(m::Model) = getRobust(m).numUncs
 
 #-----------------------------------------------------------------------
 # UncExpr   ∑ᵢ aᵢ uᵢ
+# An affine expression of uncertain parameters and numbers
 typealias UncExpr GenericAffExpr{Float64,Uncertain}
 
 UncExpr() = zero(UncExpr)
@@ -189,20 +194,64 @@ end
 
 
 #-----------------------------------------------------------------------
+# Adaptive
+# An adaptive variable, a variable whose value depends on the realized
+# values of the uncertain parameters.
+type Adaptive <: JuMP.AbstractJuMPScalar
+    m::Model
+    id::Int
+end
+function Adaptive(m::Model, name::String, lower::Real, upper::Real,
+                    cat::Symbol, policy::Symbol,
+                    stage::Int, depends_on::Vector{Uncertain})
+    rd = getRobust(m)
+    rd.numAdapt += 1
+    push!(rd.adpNames, name)
+    push!(rd.adpLower, lower)
+    push!(rd.adpUpper, upper)
+    push!(rd.adpCat,   cat)
+    push!(rd.adpPolicy, policy)
+    push!(rd.adpStage, stage)
+    push!(rd.adpDependsOn, depends_on)
+    return Adaptive(m, rd.numAdapt)
+end
+
+typealias JuMPeRVar Union{Variable,Adaptive}
+
+
+#-----------------------------------------------------------------------
+# AdaptAffExpr
+# Equivalent to AffExpr, except the variable can be either a
+# JuMP.Variable or JuMPeR.Adaptive
+typealias AdaptAffExpr GenericAffExpr{Float64,JuMPeRVar}
+
+AdaptAffExpr() = zero(AdaptAffExpr)
+Base.convert(::Type{AdaptAffExpr}, c::Number) =
+    AdaptAffExpr(JuMPeRVar[ ], Float64[ ], 0.0)
+Base.convert(::Type{AdaptAffExpr}, x::JuMPeRVar) =
+    AdaptAffExpr(JuMPeRVar[x],Float64[1], 0.0)
+Base.convert(::Type{AdaptAffExpr}, aff::AffExpr) =
+    AdaptAffExpr(copy(aff.vars), copy(aff.coeffs), aff.constant)
+
+# AdaptConstraint         A constraint with variables and uncertains
+typealias AdaptConstraint GenericRangeConstraint{AdaptAffExpr}
+addConstraint(m::Model, c::AdaptConstraint) = push!(getRobust(m).varaffcons, c)
+
+#-----------------------------------------------------------------------
 # UncAffExpr   ∑ⱼ (∑ᵢ aᵢⱼ uᵢ) xⱼ
-typealias UncAffExpr GenericAffExpr{UncExpr,Variable}
+typealias UncAffExpr GenericAffExpr{UncExpr,JuMPeRVar}
 
 UncAffExpr() = zero(UncAffExpr)
 Base.convert(::Type{UncAffExpr}, c::Number) =
-    UncAffExpr(Variable[], UncExpr[], UncExpr(c))
-Base.convert(::Type{UncAffExpr}, x::Variable) =
-    UncAffExpr(Variable[x],UncExpr[UncExpr(1)], UncExpr())
+    UncAffExpr(JuMPeRVar[], UncExpr[], UncExpr(c))
+Base.convert(::Type{UncAffExpr}, x::JuMPeRVar) =
+    UncAffExpr(JuMPeRVar[x],UncExpr[UncExpr(1)], UncExpr())
 Base.convert(::Type{UncAffExpr}, aff::AffExpr) =
     UncAffExpr(copy(aff.vars), map(UncExpr,aff.coeffs), UncExpr(aff.constant))
 Base.convert(::Type{UncAffExpr}, uaff::UncExpr) =
-    UncAffExpr(Variable[], UncExpr[], uaff)
+    UncAffExpr(JuMPeRVar[], UncExpr[], uaff)
 
-function Base.push!(faff::UncAffExpr, new_coeff::Union(Real,Uncertain), new_var::Variable)
+function Base.push!(faff::UncAffExpr, new_coeff::Union(Real,Uncertain), new_var::JuMPeRVar)
     push!(faff.vars, new_var)
     push!(faff.coeffs, UncExpr(new_coeff))
 end
@@ -254,7 +303,8 @@ addEllipseConstraint(m::Model, vec::Vector, Gamma::Real) =
 
 #-----------------------------------------------------------------------
 # Adaptive optimization
-include("adaptive/adaptvar.jl")
+include("adaptive/macro.jl")
+include("adaptive/operators.jl")
 
 # Scenarios
 include("scenario.jl")
