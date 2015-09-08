@@ -45,15 +45,13 @@ export addEllipseConstraint, EllipseConstraint
 # RobustData contains all extensions to the base JuMP model type
 type RobustData
     # Variable-Uncertain mixed constraints
-    uncertainconstr::Vector
+    uncertainconstr::Vector # {UncConstraint}
     # Oracles associated with each uncertainconstr
-    oracles::Vector
+    oracles::Vector # {Any}
     # Uncertain-only constraints
-    uncertaintyset::Vector
+    uncertaintyset::Vector # {UncSetConstraint}
     normconstraints::Vector
-    
-    # Adaptive constraints
-    varaffcons::Vector  # no uncertainty
+    varaffcons::Vector # {AdaptConstraint}
 
     # Uncertainty data
     numUncs::Int
@@ -61,9 +59,9 @@ type RobustData
     uncLower::Vector{Float64}
     uncUpper::Vector{Float64}
     uncCat::Vector{Symbol}
+
     defaultOracle
 
-    # Active cuts
     activecuts
 
     # Can have different solver for cutting planes
@@ -85,17 +83,16 @@ type RobustData
     adpCat::Vector{Symbol}
     adpPolicy::Vector{Symbol}
     adpStage::Vector{Int}
-    adpDependsOn::Vector # {Vector{Uncertain}}
+    adpDependsOn::Vector{Any}
 
     solve_time::Float64
 end
 RobustData(cutsolver) = RobustData(
-    Any[],          # uncertainconstr
-    Any[],          # oracles
-    Any[],          # uncertaintyset
-    Any[],          # normconstraints
-    # Adaptive constraints
-    VarAffConstraint[],     # varaffcons
+    UncConstraint[],    # uncertainconstr
+    Any[],              # oracles
+    UncSetConstraint[], # uncertaintyset
+    Any[],              # normconstraints
+    AdaptConstraint[],  # varaffcons
     # Uncertainty set
     0,              # numUncs
     UTF8String[],   # uncNames
@@ -114,7 +111,7 @@ RobustData(cutsolver) = RobustData(
     Float64[],Float64[],    # Lower, upper
     Symbol[],Symbol[],      # Category, adapt type
     Int[],                  # Stage
-    Vector{Uncertain}[],    # Depends on
+    Any[],                  # Depends on
 
     0.0)            # solve_time
 function RobustModel(; solver=JuMP.UnsetSolver(),
@@ -203,18 +200,30 @@ type Adaptive <: JuMP.AbstractJuMPScalar
 end
 function Adaptive(m::Model, name::String, lower::Real, upper::Real,
                     cat::Symbol, policy::Symbol,
-                    stage::Int, depends_on::Vector{Uncertain})
+                    stage::Int, depends_on::Any)
     rd = getRobust(m)
     rd.numAdapt += 1
-    push!(rd.adpNames, name)
-    push!(rd.adpLower, lower)
-    push!(rd.adpUpper, upper)
-    push!(rd.adpCat,   cat)
+    push!(rd.adpNames,  name)
+    push!(rd.adpLower,  lower)
+    push!(rd.adpUpper,  upper)
+    push!(rd.adpCat,    cat)
     push!(rd.adpPolicy, policy)
-    push!(rd.adpStage, stage)
+    push!(rd.adpStage,  stage)
     push!(rd.adpDependsOn, depends_on)
     return Adaptive(m, rd.numAdapt)
 end
+getName(a::Adaptive)        = adp_str(REPLMode, a.m, a.id)
+getLower(a::Adaptive)       = getRobust(a.m).adpLower[a.id]
+getUpper(a::Adaptive)       = getRobust(a.m).adpUpper[a.id]
+getCategory(a::Adaptive)    = getRobust(a.m).adpCat[a.id]
+getPolicy(a::Adaptive)      = getRobust(a.m).adpPolicy[a.id]
+getStage(a::Adaptive)       = getRobust(a.m).adpStage[a.id]
+getDependsOn(a::Adaptive)   = getRobust(a.m).adpDependsOn[a.id]
+Base.zero(::Type{Adaptive}) = AdaptAffExpr()
+Base.zero(     ::Adaptive)  = zero(Adaptive)
+Base.one(::Type{Adaptive})  = AdaptAffExpr(1)
+Base.one(     ::Adaptive)   = one(Adaptive)
+Base.isequal(a::Adaptive, b::Adaptive) = (a.m === b.m) && (a.id == b.id)
 
 typealias JuMPeRVar Union{Variable,Adaptive}
 
@@ -305,6 +314,7 @@ addEllipseConstraint(m::Model, vec::Vector, Gamma::Real) =
 # Adaptive optimization
 include("adaptive/macro.jl")
 include("adaptive/operators.jl")
+include("adaptive/expand.jl")
 
 # Scenarios
 include("scenario.jl")
@@ -323,6 +333,7 @@ include("robustmacro.jl")
 
 # Pretty printing
 include("print.jl")
+include("adaptive/print.jl")
 
 # Graph algorithms
 include("graph.jl")
